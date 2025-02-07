@@ -1,0 +1,4 @@
+-- перезагрузка журнала
+EXEC msdb.dbo.sp_cycle_agent_errorlog;
+-- проверка результата
+EXEC msdb.dbo.sp_readerrorlog;

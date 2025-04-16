@@ -1,0 +1,90 @@
+--Простейшие запросы с использованием операторов сравнения:
+
+--Запрос 1: Преподаватели с опытом работы более 15 лет.
+
+SELECT * FROM Teacher WHERE Experience > 15;
+
+
+--Запросы с использованием логических операторов AND, OR и NOT:
+
+--Запрос 2: Преподаватели, родившиеся после 1980 года.
+
+SELECT * FROM Teacher WHERE Birth_Date > '1980-01-01';
+
+
+--Запросы с использованием логических операторов AND, OR и NOT:
+
+--Запрос 3: Преподаватели, работающие на кафедре программирования и имеющие опыт более 5 лет.
+
+SELECT * FROM Teacher T
+JOIN Department D ON T.Department_ID = D.Department_ID
+WHERE D.Department_Name = 'Кафедра программирования' AND T.Experience > 5;
+
+
+--Запрос 4: Преподаватели, которые либо работают на кафедре программирования, либо имеют опыт менее 10 лет.
+
+SELECT * FROM Teacher T
+JOIN Department D ON T.Department_ID = D.Department_ID
+WHERE D.Department_Name = 'Кафедра программирования' OR T.Experience < 10;
+
+
+--Запрос 5: Преподаватели, которые не работают на кафедре программирования.
+
+SELECT * FROM Teacher T
+JOIN Department D ON T.Department_ID = D.Department_ID
+WHERE NOT D.Department_Name = 'Кафедра программирования';
+
+
+--Запрос на использование комбинации логических операторов:
+
+--Запрос 6: Преподаватели, работающие на кафедре экономики или имеющие опыт менее 10 лет и родившиеся после 1985 года.
+
+SELECT * FROM Teacher T
+JOIN Department D ON T.Department_ID = D.Department_ID
+WHERE D.Department_Name = 'Кафедра экономики' OR (T.Experience < 10 AND T.Birth_Date > '1985-01-01');
+
+
+--Запрос на использование выражений над столбцами:
+
+--Запрос 7: Преподаватели, у которых опыт работы в текущем году равен разнице между текущим годом и годом трудоустройства.
+
+SELECT * FROM Teacher WHERE Experience = (2025 - Year_of_Employment);
+
+
+--Запросы с проверкой на принадлежность множеству:
+
+--Запрос 8: Преподаватели, работающие на кафедре программирования или кафедре сетевых технологий.
+
+SELECT * FROM Teacher T
+JOIN Department D ON T.Department_ID = D.Department_ID
+WHERE D.Department_Name IN ('Кафедра программирования', 'Кафедра сетевых технологий');
+
+--Запрос 9: Преподаватели, имеющие пол 'Мужской' или 'Женский'.
+
+SELECT * FROM Teacher WHERE Gender IN ('Мужской', 'Женский');
+
+
+--Запрос с проверкой на принадлежность диапазону значений:
+
+--Запрос 10: Преподаватели с опытом работы от 5 до 15 лет.
+
+SELECT * FROM Teacher WHERE Experience BETWEEN 5 AND 15;
+
+
+--Запросы с проверкой на соответствие шаблону:
+
+--Запрос 11: Преподаватели, чьи фамилии начинаются на 'П'.
+
+SELECT * FROM Teacher WHERE Last_Name LIKE 'П%';
+
+
+--Запрос 12: Преподаватели, чьи имена содержат букву 'а'.
+
+SELECT * FROM Teacher WHERE First_Name LIKE '%а%';
+
+
+--Запрос с проверкой на неопределенное значение:
+
+--Запрос 13: Преподаватели, у которых не указано отчество.
+
+SELECT * FROM Teacher WHERE Middle_Name IS NULL;

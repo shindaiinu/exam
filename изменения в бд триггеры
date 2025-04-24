@@ -1,0 +1,127 @@
+запросы
+-- добавление заявки на пропуск
+USE BuroPropuskov
+GO
+INSERT INTO Propuski.Zayavki_na_propuska (id_posetitelya, cel_visita, data_visita, status, id_sotrudnika)
+VALUES (1, 'Деловая встреча', '2025-04-01 10:00:00', 'новая', 2);
+USE BuroPropuskov;
+GO
+
+-- Удаление пропусков, связанных с заявкой
+DELETE FROM Propuski.Propuska_posetiteley WHERE id_zayavki = 1;
+
+-- Удаление заявки
+DELETE FROM Propuski.Zayavki_na_propuska WHERE id_zayavki = 1;
+-- обновление статуса заявки
+USE BuroPropuskov
+GO
+UPDATE Propuski.Zayavki_na_propuska
+SET status = 'одобрена'
+WHERE id_zayavki = 1;
+
+
+триггеры
+на обновление
+
+CREATE TRIGGER TR_Zayavka_Update
+ON Propuski.Zayavki_na_propuska
+AFTER UPDATE
+AS
+BEGIN
+    DECLARE @ZayavkaID INT;
+    DECLARE @OldStatus NVARCHAR(20);
+    DECLARE @NewStatus NVARCHAR(20);
+
+    DECLARE zayavka_cursor CURSOR FOR
+    SELECT 
+        i.id_zayavki,  
+        d.status,      
+        i.status       
+    FROM 
+        inserted i
+    JOIN 
+        deleted d ON i.id_zayavki = d.id_zayavki;
+
+    OPEN zayavka_cursor;
+    FETCH NEXT FROM zayavka_cursor INTO @ZayavkaID, @OldStatus, @NewStatus;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        -- Сообщение через RAISERROR (уровень 0 — информационное)
+        RAISERROR('Статус заявки с ID %d изменен с "%s" на "%s".', 0, 1, @ZayavkaID, @OldStatus, @NewStatus);
+
+        FETCH NEXT FROM zayavka_cursor INTO @ZayavkaID, @OldStatus, @NewStatus;
+    END
+
+    CLOSE zayavka_cursor;
+    DEALLOCATE zayavka_cursor;
+END;
+GO
+ над удаление
+USE BuroPropuskov;
+GO
+
+-- Пересоздание триггера TR_Zayavka_Delete
+IF OBJECT_ID('Propuski.TR_Zayavka_Delete', 'TR') IS NOT NULL
+    DROP TRIGGER Propuski.TR_Zayavka_Delete;
+GO
+
+CREATE TRIGGER TR_Zayavka_Delete
+ON Propuski.Zayavki_na_propuska
+AFTER DELETE
+AS
+BEGIN
+    DECLARE @ZayavkaID INT;
+    DECLARE @CelVisita VARCHAR(255);
+
+    DECLARE zayavka_cursor CURSOR FOR
+    SELECT id_zayavki, cel_visita
+    FROM deleted;
+
+    OPEN zayavka_cursor;
+    FETCH NEXT FROM zayavka_cursor INTO @ZayavkaID, @CelVisita;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        -- Вывод сообщения об удалении через RAISERROR
+        RAISERROR('Заявка с ID %d и целью визита "%s" была удалена.', 0, 1, @ZayavkaID, @CelVisita);
+
+        FETCH NEXT FROM zayavka_cursor INTO @ZayavkaID, @CelVisita;
+    END
+
+    CLOSE zayavka_cursor;
+    DEALLOCATE zayavka_cursor;
+END;
+GO
+ на добавдение
+
+USE BuroPropuskov;
+GO
+
+-- Создание триггера для проверки добавления заявки на пропуск
+CREATE TRIGGER TR_Zayavka_Insert
+ON Propuski.Zayavki_na_propuska
+AFTER INSERT
+AS
+BEGIN
+    DECLARE @ZayavkaID INT;
+    
+    -- Пример проверки: если цель визита пустая
+    IF EXISTS (
+        SELECT 1
+        FROM inserted
+        WHERE cel_visita IS NULL OR cel_visita = ''
+    )
+    BEGIN
+        RAISERROR('Ошибка: Цель визита не может быть пустой!', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Пример вывода сообщения об успешной вставке
+    SELECT @ZayavkaID = id_zayavki
+    FROM inserted;
+
+    RAISERROR('Запись успешно добавлена. ID заявки: %d', 0, 1, @ZayavkaID);
+END;
+GO

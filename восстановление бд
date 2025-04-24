@@ -1,0 +1,11 @@
+журнал транзакций
+
+RESTORE LOG setprodmag
+FROM DISK = 'E:\4ИСП\Rez\copy'
+WITH RECOVERY;
+
+диффер восстановление
+
+RESTORE DATABASE setprodmag
+FROM DISK = 'E:\4ИСП\Rez\copy'
+WITH NORECOVERY;

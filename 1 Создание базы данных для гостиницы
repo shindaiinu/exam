@@ -1,0 +1,174 @@
+-- Создаем базу данных
+CREATE DATABASE HotelManagement;
+GO
+
+USE HotelManagement;
+GO
+
+-- Таблица категорий номеров
+CREATE TABLE RoomCategories (
+    category_id INT PRIMARY KEY IDENTITY(1,1),
+    category_name NVARCHAR(100) NOT NULL,
+    capacity INT NOT NULL,
+    description NVARCHAR(500),
+    base_price DECIMAL(10, 2) NOT NULL
+);
+
+-- Таблица статусов номеров
+CREATE TABLE RoomStatuses (
+    status_id INT PRIMARY KEY IDENTITY(1,1),
+    status_name NVARCHAR(50) NOT NULL
+);
+
+-- Таблица номеров
+CREATE TABLE Rooms (
+    room_id INT PRIMARY KEY IDENTITY(1,1),
+    room_number NVARCHAR(10) NOT NULL UNIQUE,
+    floor NVARCHAR(20) NOT NULL,
+    category_id INT NOT NULL FOREIGN KEY REFERENCES RoomCategories(category_id),
+    status_id INT NOT NULL FOREIGN KEY REFERENCES RoomStatuses(status_id)
+);
+
+-- Таблица гостей
+CREATE TABLE Guests (
+    guest_id INT PRIMARY KEY IDENTITY(1,1),
+    full_name NVARCHAR(100) NOT NULL,
+    contact_details NVARCHAR(200),
+    passport_data NVARCHAR(100),
+    preferences NVARCHAR(500)
+);
+
+-- Таблица бронирований
+CREATE TABLE Bookings (
+    booking_id INT PRIMARY KEY IDENTITY(1,1),
+    guest_id INT NOT NULL FOREIGN KEY REFERENCES Guests(guest_id),
+    room_id INT NOT NULL FOREIGN KEY REFERENCES Rooms(room_id),
+    check_in_date DATETIME NOT NULL,
+    check_out_date DATETIME NOT NULL,
+    booking_status NVARCHAR(20) NOT NULL,
+    total_price DECIMAL(10, 2) NOT NULL
+);
+
+-- Таблица карт доступа
+CREATE TABLE AccessCards (
+    card_id INT PRIMARY KEY IDENTITY(1,1),
+    guest_id INT NOT NULL FOREIGN KEY REFERENCES Guests(guest_id),
+    room_id INT NOT NULL FOREIGN KEY REFERENCES Rooms(room_id),
+    issue_date DATETIME NOT NULL,
+    expire_date DATETIME NOT NULL,
+    card_status NVARCHAR(20) NOT NULL
+);
+
+-- Таблица заселений
+CREATE TABLE CheckIns (
+    check_in_id INT PRIMARY KEY IDENTITY(1,1),
+    booking_id INT NOT NULL FOREIGN KEY REFERENCES Bookings(booking_id),
+    actual_check_in DATETIME NOT NULL,
+    actual_check_out DATETIME,
+    card_id INT NOT NULL FOREIGN KEY REFERENCES AccessCards(card_id)
+);
+
+-- Таблица сотрудников
+CREATE TABLE Staff (
+    staff_id INT PRIMARY KEY IDENTITY(1,1),
+    full_name NVARCHAR(100) NOT NULL,
+    position NVARCHAR(50) NOT NULL,
+    contact_details NVARCHAR(200),
+    work_schedule NVARCHAR(100)
+);
+
+-- Таблица уборки
+CREATE TABLE Cleaning (
+    cleaning_id INT PRIMARY KEY IDENTITY(1,1),
+    room_id INT NOT NULL FOREIGN KEY REFERENCES Rooms(room_id),
+    staff_id INT NOT NULL FOREIGN KEY REFERENCES Staff(staff_id),
+    assigned_date DATETIME NOT NULL,
+    completed_date DATETIME,
+    cleaning_status NVARCHAR(20) NOT NULL
+);
+
+-- Таблица услуг
+CREATE TABLE Services (
+    service_id INT PRIMARY KEY IDENTITY(1,1),
+    service_name NVARCHAR(100) NOT NULL,
+    description NVARCHAR(500),
+    price DECIMAL(10, 2) NOT NULL
+);
+
+-- Таблица оказанных услуг
+CREATE TABLE ProvidedServices (
+    provided_service_id INT PRIMARY KEY IDENTITY(1,1),
+    service_id INT NOT NULL FOREIGN KEY REFERENCES Services(service_id),
+    booking_id INT NOT NULL FOREIGN KEY REFERENCES Bookings(booking_id),
+    service_date DATETIME NOT NULL,
+    service_price DECIMAL(10, 2) NOT NULL
+);
+
+-- Таблица платежей
+CREATE TABLE Payments (
+    payment_id INT PRIMARY KEY IDENTITY(1,1),
+    booking_id INT NOT NULL FOREIGN KEY REFERENCES Bookings(booking_id),
+    amount DECIMAL(10, 2) NOT NULL,
+    payment_date DATETIME NOT NULL,
+    payment_method NVARCHAR(50) NOT NULL,
+    payment_status NVARCHAR(20) NOT NULL
+);
+Импорт данных из "Номерной фонд.xlsx"
+-- Сначала заполняем справочники
+INSERT INTO RoomStatuses (status_name) VALUES 
+('Чистый'), ('Грязный'), ('Занят'), ('Назначен к уборке');
+
+INSERT INTO RoomCategories (category_name, capacity, description, base_price) VALUES
+('Одноместный стандарт', 1, 'Стандартный одноместный номер', 2500.00),
+('Одноместный эконом', 1, 'Экономный одноместный номер', 1800.00),
+('Стандарт двухместный с 2 раздельными кроватями', 2, 'Стандартный двухместный номер с двумя кроватями', 3500.00),
+('Эконом двухместный с 2 раздельными кроватями', 2, 'Экономный двухместный номер с двумя кроватями', 2800.00),
+('3-местный бюджет', 3, 'Бюджетный трехместный номер', 4200.00),
+('Бизнес с 1 или 2 кроватями', 2, 'Бизнес-класс с выбором конфигурации кроватей', 5000.00),
+('Двухкомнатный двухместный стандарт с 1 или 2 кроватями', 2, 'Двухкомнатный номер стандарт', 6000.00),
+('Студия', 2, 'Номер-студия', 5500.00),
+('Люкс с 2 двуспальными кроватями', 2, 'Номер люкс с двумя двуспальными кроватями', 8000.00);
+
+-- Импортируем номера из Excel
+INSERT INTO Rooms (room_number, floor, category_id, status_id)
+SELECT 
+    Номер AS room_number,
+    Этаж AS floor,
+    CASE 
+        WHEN Категория = 'Одноместный стандарт' THEN 1
+        WHEN Категория = 'Одноместный эконом' THEN 2
+        WHEN Категория = 'Стандарт двухместный с 2 раздельными кроватями' THEN 3
+        WHEN Категория = 'Эконом двухместный с 2 раздельными кроватями' THEN 4
+        WHEN Категория = '3-местный бюджет' THEN 5
+        WHEN Категория = 'Бизнес с 1 или 2 кроватями' THEN 6
+        WHEN Категория = 'Двухкомнатный двухместный стандарт с 1 или 2 кроватями' THEN 7
+        WHEN Категория = 'Студия' THEN 8
+        WHEN Категория = 'Люкс с 2 двуспальными кроватями' THEN 9
+    END AS category_id,
+    CASE 
+        WHEN Номер IN ('101', '102', '104', '105', '107', '108', '109', '110', '201', '203', '205', '206', '207', '208', '209', '304', '306') THEN 3 -- Занят
+        WHEN Номер IN ('204', '301', '302') THEN 4 -- Назначен к уборке
+        WHEN Номер IN ('103', '106', '202', '303', '305') THEN 1 -- Чистый
+    END AS status_id
+FROM OPENROWSET('Microsoft.ACE.OLEDB.12.0',
+    'Excel 12.0;Database=C:\path\to\Номерной фонд.xlsx;HDR=YES',
+    'SELECT * FROM [Лист_1$]');
+
+Запрос для расчета процента загрузки номерного фонда
+-- Запрос для расчета процента загрузки на определенную дату (например, 2025-03-01)
+DECLARE @report_date DATE = '2025-03-01';
+DECLARE @total_rooms INT;
+
+-- Получаем общее количество номеров
+SELECT @total_rooms = COUNT(*) FROM Rooms;
+
+-- Рассчитываем процент загрузки
+SELECT 
+    @report_date AS report_date,
+    @total_rooms AS total_rooms,
+    COUNT(b.booking_id) AS occupied_rooms,
+    CAST(COUNT(b.booking_id) AS FLOAT) / @total_rooms * 100 AS occupancy_percentage
+FROM 
+    Bookings b
+WHERE 
+    @report_date BETWEEN b.check_in_date AND b.check_out_date;

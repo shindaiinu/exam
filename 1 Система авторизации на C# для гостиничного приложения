@@ -1,0 +1,508 @@
+Система авторизации на C# для гостиничного приложения
+1. Модели данных (Entities)
+csharp
+public class User
+{
+    public int Id { get; set; }
+    
+    [Required]
+    [StringLength(50)]
+    public string Username { get; set; }
+    
+    [Required]
+    public string PasswordHash { get; set; }
+    
+    [Required]
+    [StringLength(100)]
+    public string FullName { get; set; }
+    
+    [Required]
+    [StringLength(20)]
+    public string Role { get; set; } // "Administrator" или "User"
+    
+    public bool IsLocked { get; set; }
+    
+    public int FailedLoginAttempts { get; set; }
+    
+    public DateTime? LastLoginDate { get; set; }
+    
+    public bool PasswordChanged { get; set; }
+    
+    public DateTime CreatedDate { get; set; }
+    
+    public int? CreatedById { get; set; }
+    
+    [ForeignKey("CreatedById")]
+    public User CreatedBy { get; set; }
+}
+2. Контроллер авторизации (AuthController.cs)
+csharp
+[ApiController]
+[Route("api/[controller]")]
+public class AuthController : ControllerBase
+{
+    private readonly HotelDbContext _context;
+    private readonly IConfiguration _configuration;
+    
+    public AuthController(HotelDbContext context, IConfiguration configuration)
+    {
+        _context = context;
+        _configuration = configuration;
+    }
+    
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] LoginModel model)
+    {
+        // Проверка обязательных полей
+        if (!ModelState.IsValid)
+            return BadRequest(new { message = "Логин и пароль обязательны для заполнения" });
+        
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == model.Username);
+        
+        // Проверка существования пользователя
+        if (user == null)
+            return Unauthorized(new { message = "Неверный логин или пароль" });
+        
+        // Проверка блокировки
+        if (user.IsLocked)
+            return Unauthorized(new { message = "Вы заблокированы. Обратитесь к администратору" });
+        
+        // Проверка пароля
+        if (!VerifyPassword(model.Password, user.PasswordHash))
+        {
+            // Увеличение счетчика неудачных попыток
+            user.FailedLoginAttempts++;
+            
+            // Блокировка после 3 неудачных попыток
+            if (user.FailedLoginAttempts >= 3)
+            {
+                user.IsLocked = true;
+                await _context.SaveChangesAsync();
+                return Unauthorized(new { message = "Вы заблокированы. Обратитесь к администратору" });
+            }
+            
+            await _context.SaveChangesAsync();
+            return Unauthorized(new { message = "Неверный логин или пароль" });
+        }
+        
+        // Проверка неактивности более 1 месяца
+        if (user.LastLoginDate.HasValue && (DateTime.Now - user.LastLoginDate.Value).TotalDays > 30)
+        {
+            user.IsLocked = true;
+            await _context.SaveChangesAsync();
+            return Unauthorized(new { message = "Вы заблокированы. Обратитесь к администратору" });
+        }
+        
+        // Сброс счетчика неудачных попыток
+        user.FailedLoginAttempts = 0;
+        user.LastLoginDate = DateTime.Now;
+        await _context.SaveChangesAsync();
+        
+        // Генерация JWT токена
+        var token = GenerateJwtToken(user);
+        
+        return Ok(new 
+        {
+            token,
+            role = user.Role,
+            requirePasswordChange = !user.PasswordChanged
+        });
+    }
+    
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordModel model)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new { message = "Все поля обязательны для заполнения" });
+        
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+        var user = await _context.Users.FindAsync(userId);
+        
+        if (user == null)
+            return NotFound(new { message = "Пользователь не найден" });
+        
+        // Проверка текущего пароля
+        if (!VerifyPassword(model.CurrentPassword, user.PasswordHash))
+            return BadRequest(new { message = "Текущий пароль введен неверно" });
+        
+        // Проверка совпадения нового пароля
+        if (model.NewPassword != model.ConfirmPassword)
+            return BadRequest(new { message = "Новый пароль и подтверждение не совпадают" });
+        
+        // Хеширование и сохранение нового пароля
+        user.PasswordHash = HashPassword(model.NewPassword);
+        user.PasswordChanged = true;
+        await _context.SaveChangesAsync();
+        
+        return Ok(new { message = "Пароль успешно изменен" });
+    }
+    
+    private string GenerateJwtToken(User user)
+    {
+        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
+        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+        
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Name, user.Username),
+            new Claim(ClaimTypes.Role, user.Role)
+        };
+        
+        var token = new JwtSecurityToken(
+            _configuration["Jwt:Issuer"],
+            _configuration["Jwt:Audience"],
+            claims,
+            expires: DateTime.Now.AddHours(8),
+            signingCredentials: credentials);
+        
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+    
+    private string HashPassword(string password)
+    {
+        return BCrypt.Net.BCrypt.HashPassword(password);
+    }
+    
+    private bool VerifyPassword(string password, string hash)
+    {
+        return BCrypt.Net.BCrypt.Verify(password, hash);
+    }
+}
+
+public class LoginModel
+{
+    [Required]
+    public string Username { get; set; }
+    
+    [Required]
+    public string Password { get; set; }
+}
+
+public class ChangePasswordModel
+{
+    [Required]
+    public string CurrentPassword { get; set; }
+    
+    [Required]
+    public string NewPassword { get; set; }
+    
+    [Required]
+    public string ConfirmPassword { get; set; }
+}
+3. Контроллер управления пользователями (UsersController.cs)
+csharp
+[ApiController]
+[Route("api/[controller]")]
+[Authorize(Roles = "Administrator")]
+public class UsersController : ControllerBase
+{
+    private readonly HotelDbContext _context;
+    
+    public UsersController(HotelDbContext context)
+    {
+        _context = context;
+    }
+    
+    [HttpGet]
+    public async Task<IActionResult> GetAll()
+    {
+        var users = await _context.Users
+            .Select(u => new 
+            {
+                u.Id,
+                u.Username,
+                u.FullName,
+                u.Role,
+                u.IsLocked,
+                u.LastLoginDate
+            })
+            .ToListAsync();
+        
+        return Ok(users);
+    }
+    
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] CreateUserModel model)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+        
+        // Проверка уникальности логина
+        if (await _context.Users.AnyAsync(u => u.Username == model.Username))
+            return BadRequest(new { message = "Пользователь с таким логином уже существует" });
+        
+        var currentUserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier).Value);
+        
+        var user = new User
+        {
+            Username = model.Username,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(model.Password),
+            FullName = model.FullName,
+            Role = model.Role,
+            CreatedDate = DateTime.Now,
+            CreatedById = currentUserId,
+            PasswordChanged = false
+        };
+        
+        _context.Users.Add(user);
+        await _context.SaveChangesAsync();
+        
+        return Ok(new { message = "Пользователь успешно создан" });
+    }
+    
+    [HttpPut("{id}")]
+    public async Task<IActionResult> Update(int id, [FromBody] UpdateUserModel model)
+    {
+        var user = await _context.Users.FindAsync(id);
+        
+        if (user == null)
+            return NotFound();
+        
+        if (!string.IsNullOrEmpty(model.FullName))
+            user.FullName = model.FullName;
+        
+        if (!string.IsNullOrEmpty(model.Role))
+            user.Role = model.Role;
+        
+        if (model.IsLocked.HasValue)
+            user.IsLocked = model.IsLocked.Value;
+        
+        await _context.SaveChangesAsync();
+        
+        return Ok(new { message = "Данные пользователя обновлены" });
+    }
+}
+
+public class CreateUserModel
+{
+    [Required]
+    [StringLength(50)]
+    public string Username { get; set; }
+    
+    [Required]
+    [StringLength(100)]
+    public string FullName { get; set; }
+    
+    [Required]
+    [StringLength(20)]
+    public string Role { get; set; }
+    
+    [Required]
+    [StringLength(100, MinimumLength = 6)]
+    public string Password { get; set; }
+}
+
+public class UpdateUserModel
+{
+    [StringLength(100)]
+    public string FullName { get; set; }
+    
+    [StringLength(20)]
+    public string Role { get; set; }
+    
+    public bool? IsLocked { get; set; }
+}
+4. Форма авторизации (WPF или Windows Forms)
+WPF реализация (LoginWindow.xaml)
+xml
+<Window x:Class="HotelManagement.Auth.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Авторизация" Height="300" Width="400"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
+    <Grid Margin="20">
+        <StackPanel>
+            <TextBlock Text="Авторизация" FontSize="20" FontWeight="Bold" 
+                       HorizontalAlignment="Center" Margin="0,0,0,20"/>
+            
+            <Label Content="Логин:"/>
+            <TextBox x:Name="txtUsername" Height="25"/>
+            
+            <Label Content="Пароль:" Margin="0,10,0,0"/>
+            <PasswordBox x:Name="txtPassword" Height="25"/>
+            
+            <Button Content="Войти" Margin="0,20,0,0" Height="30" 
+                    Click="LoginButton_Click"/>
+            
+            <TextBlock x:Name="txtMessage" Margin="0,10,0,0" 
+                       TextWrapping="Wrap" Foreground="Red"/>
+        </StackPanel>
+    </Grid>
+</Window>
+Code-behind (LoginWindow.xaml.cs)
+csharp
+public partial class LoginWindow : Window
+{
+    private readonly HttpClient _httpClient;
+    private int _failedAttempts = 0;
+    
+    public LoginWindow()
+    {
+        InitializeComponent();
+        _httpClient = new HttpClient { BaseAddress = new Uri("https://localhost:5001/api/") };
+    }
+    
+    private async void LoginButton_Click(object sender, RoutedEventArgs e)
+    {
+        txtMessage.Text = "";
+        
+        if (string.IsNullOrWhiteSpace(txtUsername.Text) || string.IsNullOrWhiteSpace(txtPassword.Password))
+        {
+            txtMessage.Text = "Логин и пароль обязательны для заполнения";
+            return;
+        }
+        
+        try
+        {
+            var loginModel = new { Username = txtUsername.Text, Password = txtPassword.Password };
+            var response = await _httpClient.PostAsJsonAsync("auth/login", loginModel);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<LoginResult>();
+                
+                // Сохраняем токен
+                Properties.Settings.Default.AuthToken = result.Token;
+                Properties.Settings.Default.Save();
+                
+                if (result.RequirePasswordChange)
+                {
+                    var changePasswordWindow = new ChangePasswordWindow();
+                    changePasswordWindow.Show();
+                    this.Close();
+                }
+                else
+                {
+                    OpenMainWindow(result.Role);
+                }
+            }
+            else
+            {
+                var error = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+                txtMessage.Text = error.Message;
+                
+                _failedAttempts++;
+                if (_failedAttempts >= 3)
+                {
+                    txtMessage.Text = "Вы заблокированы. Обратитесь к администратору";
+                    LoginButton.IsEnabled = false;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            txtMessage.Text = "Ошибка подключения к серверу";
+        }
+    }
+    
+    private void OpenMainWindow(string role)
+    {
+        Window mainWindow = role == "Administrator" 
+            ? new AdminMainWindow() 
+            : new UserMainWindow();
+        
+        mainWindow.Show();
+        this.Close();
+    }
+}
+
+public class LoginResult
+{
+    public string Token { get; set; }
+    public string Role { get; set; }
+    public bool RequirePasswordChange { get; set; }
+}
+
+public class ErrorResponse
+{
+    public string Message { get; set; }
+}
+5. Проектная документация
+Функциональное назначение
+Система авторизации обеспечивает:
+
+Безопасный вход пользователей с ролями "Администратор" и "Пользователь"
+
+Управление учетными записями (создание, редактирование, блокировка)
+
+Смену пароля при первом входе
+
+Защиту от brute-force атак (блокировка после 3 неудачных попыток)
+
+Автоматическую блокировку неактивных учетных записей (30 дней)
+
+Разграничение прав доступа на основе ролей
+
+Используемые методы
+Авторизация
+
+URL: POST /api/auth/login
+
+Параметры:
+
+Username (строка, обязательный) - логин пользователя
+
+Password (строка, обязательный) - пароль пользователя
+
+Ответ:
+
+Token (JWT) - токен для последующих запросов
+
+Role - роль пользователя
+
+RequirePasswordChange - необходимость смены пароля
+
+Смена пароля
+
+URL: POST /api/auth/change-password
+
+Требует аутентификации
+
+Параметры:
+
+CurrentPassword (строка) - текущий пароль
+
+NewPassword (строка) - новый пароль
+
+ConfirmPassword (строка) - подтверждение нового пароля
+
+Ответ:
+
+Сообщение об успехе или ошибке
+
+Управление пользователями (только для администраторов)
+
+Получение списка: GET /api/users
+
+Создание: POST /api/users
+
+Редактирование: PUT /api/users/{id}
+
+Требования к безопасности
+Пароли хранятся в виде хешей (BCrypt)
+
+Используется JWT для аутентификации
+
+Все запросы (кроме авторизации) требуют валидного токена
+
+Чувствительные операции (смена пароля) требуют подтверждения текущего пароля
+
+Реализована защита от brute-force атак
+
+Дополнительные функции
+Администраторы могут:
+
+Просматривать список всех пользователей
+
+Создавать новых пользователей
+
+Редактировать данные пользователей
+
+Блокировать/разблокировать учетные записи
+
+Пользователи обязаны сменить пароль при первом входе
+
+Автоматическая блокировка неактивных учетных записей
+

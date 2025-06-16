@@ -1,8 +1,0 @@
--- копирование протоколов транзакций
-BACKUP LOG setprodmag TO DISK = 'E:\4ИСП\Rez\copy' 
-
--- дифференцированное резервное копирование 
-BACKUP DATABASE setprodmag TO DISK = 'E:\4ИСП\Rez\copy' WITH DIFFERENTIAL 
-
--- полное резервное копирование 
-BACKUP DATABASE setprodmag TO DISK = 'E:\4ИСП\Rez\copy' 

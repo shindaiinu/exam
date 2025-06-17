@@ -1,0 +1,113 @@
+using hosphr.Forms.Admin;
+using hosphr.Forms.HR;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Data.SqlClient;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
+
+namespace hosphr
+{
+    public partial class Autorize : Form
+    {
+        private string connectionString = "Data Source=DESKTOP-VIC55GK;Initial Catalog=hospital_hr;Integrated Security=True;TrustServerCertificate=True";
+        public Autorize()
+        {
+            InitializeComponent();
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            string login = textBox1.Text.Trim();
+            string password = textBox2.Text.Trim();
+
+            if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password))
+            {
+                MessageBox.Show("Введите логин и пароль.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "SELECT role, password FROM users WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@login", login);
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read()) // Пользователь найден
+                        {
+                            string storedPassword = reader["password"].ToString();
+                            string role = reader["role"].ToString();
+
+                            if (password == storedPassword) // Проверка пароля
+                            {
+                                
+
+                                // Очистка полей после успешного входа
+                                textBox1.Clear();
+                                textBox2.Clear();
+
+                                // Открытие соответствующей формы
+                                if (role == "admin")
+                                {
+                                    AdminForm adminForm = new AdminForm();
+                                    adminForm.Show();
+                                }
+                                else if (role == "hr")
+                                {
+                                    KadrForm kadrForm = new KadrForm();
+                                    kadrForm.Show();
+                                }
+
+                                this.Hide(); // Скрываем форму авторизации
+                            }
+                            else
+                            {
+                                MessageBox.Show("Неверный пароль. Попробуйте снова.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        }
+                        else
+                        {
+                            MessageBox.Show("Такого пользователя не существует. Проверьте правильность ввода.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                }
+            }
+        
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            //справка
+            // Справка по авторизации
+            string helpText = "Справка по процессу авторизации\n\n" +
+                "1. Ввод логина и пароля:\n" +
+                "- Введите ваш логин в поле 'Логин'.\n" +
+                "- Введите ваш пароль в поле 'Пароль'.\n" +
+                "- Логин и пароль чувствительны к регистру, убедитесь, что вводите их корректно.\n\n" +
+                "2. Вход в систему:\n" +
+                "- После ввода данных нажмите кнопку 'Войти'.\n" +
+                "- Система проверит логин и пароль в базе данных.\n" +
+                "- Если данные введены верно, откроется форма в зависимости от вашей роли (admin или hr).\n\n" +
+                "3. Ошибки при входе:\n" +
+                "- Если логин или пароль неверны, появится сообщение об ошибке.\n" +
+                "- Если пользователя с таким логином не существует, также будет выведено соответствующее сообщение.\n\n" +
+                "4. Роли пользователей:\n" +
+                "- Пользователи могут иметь две роли: 'admin' или 'hr'.\n" +
+                "- В зависимости от роли откроется соответствующая форма:\n" +
+                "  - 'admin' — форма администратора, где можно управлять данными пользователей.\n" +
+                "  - 'hr' — форма кадрового отдела, где можно управлять данными сотрудников.\n\n" +
+                "Если у вас возникли вопросы, обратитесь к системному администратору.";
+
+            MessageBox.Show(helpText, "Справка", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+}

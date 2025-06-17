@@ -1,0 +1,324 @@
+using hosphr.Forms.Admin;
+using hosphr.Forms.HR;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Data.SqlClient;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
+
+namespace hosphr
+{
+    public partial class Autorize : Form
+    {
+        private string connectionString = "Data Source=DESKTOP-VIC55GK;Initial Catalog=hospital_hr;Integrated Security=True;TrustServerCertificate=True";
+        private int failedAttempts = 0;
+        private const int MaxFailedAttempts = 3;
+
+        public Autorize()
+        {
+            InitializeComponent();
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            string login = textBox1.Text.Trim();
+            string password = textBox2.Text.Trim();
+
+            if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password))
+            {
+                MessageBox.Show("Введите логин и пароль.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "SELECT role, password, is_first_login, is_blocked, last_login_date FROM users WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@login", login);
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read()) // Пользователь найден
+                        {
+                            bool isBlocked = Convert.ToBoolean(reader["is_blocked"]);
+                            DateTime? lastLoginDate = reader["last_login_date"] as DateTime?;
+                            
+                            // Проверка на блокировку по времени (1 месяц)
+                            if (lastLoginDate.HasValue && (DateTime.Now - lastLoginDate.Value).TotalDays > 30)
+                            {
+                                BlockUser(login);
+                                isBlocked = true;
+                            }
+
+                            if (isBlocked)
+                            {
+                                MessageBox.Show("Вы заблокированы. Обратитесь к администратору.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                return;
+                            }
+
+                            string storedPassword = reader["password"].ToString();
+                            string role = reader["role"].ToString();
+                            bool isFirstLogin = Convert.ToBoolean(reader["is_first_login"]);
+
+                            if (password == storedPassword) // Проверка пароля
+                            {
+                                // Сброс счетчика неудачных попыток
+                                failedAttempts = 0;
+
+                                // Обновление даты последнего входа
+                                UpdateLastLoginDate(login);
+
+                                MessageBox.Show("Вы успешно авторизовались", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                                // Очистка полей после успешного входа
+                                textBox1.Clear();
+                                textBox2.Clear();
+
+                                // Если первый вход - открываем форму смены пароля
+                                if (isFirstLogin)
+                                {
+                                    ChangePasswordForm changePasswordForm = new ChangePasswordForm(login, connectionString);
+                                    if (changePasswordForm.ShowDialog() == DialogResult.OK)
+                                    {
+                                        // После успешной смены пароля открываем соответствующую форму
+                                        OpenRoleForm(role);
+                                    }
+                                }
+                                else
+                                {
+                                    // Открытие соответствующей формы
+                                    OpenRoleForm(role);
+                                }
+
+                                this.Hide(); // Скрываем форму авторизации
+                            }
+                            else
+                            {
+                                failedAttempts++;
+                                if (failedAttempts >= MaxFailedAttempts)
+                                {
+                                    BlockUser(login);
+                                    MessageBox.Show("Вы заблокированы после 3 неудачных попыток. Обратитесь к администратору.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                }
+                                else
+                                {
+                                    MessageBox.Show("Вы ввели неверный логин или пароль. Пожалуйста проверьте ещё раз введенные данные", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            MessageBox.Show("Вы ввели неверный логин или пароль. Пожалуйста проверьте ещё раз введенные данные", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void OpenRoleForm(string role)
+        {
+            if (role == "admin")
+            {
+                AdminForm adminForm = new AdminForm();
+                adminForm.Show();
+            }
+            else if (role == "hr")
+            {
+                KadrForm kadrForm = new KadrForm();
+                kadrForm.Show();
+            }
+        }
+
+        private void UpdateLastLoginDate(string login)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "UPDATE users SET last_login_date = @currentDate WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@currentDate", DateTime.Now);
+                    cmd.Parameters.AddWithValue("@login", login);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        private void BlockUser(string login)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "UPDATE users SET is_blocked = 1 WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@login", login);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            // Справка по авторизации
+            string helpText = "Справка по процессу авторизации\n\n" +
+                "1. Ввод логина и пароля:\n" +
+                "- Введите ваш логин в поле 'Логин'.\n" +
+                "- Введите ваш пароль в поле 'Пароль'.\n" +
+                "- Логин и пароль чувствительны к регистру, убедитесь, что вводите их корректно.\n\n" +
+                "2. Вход в систему:\n" +
+                "- После ввода данных нажмите кнопку 'Войти'.\n" +
+                "- Система проверит логин и пароль в базе данных.\n" +
+                "- Если данные введены верно, откроется форма в зависимости от вашей роли (admin или hr).\n\n" +
+                "3. Ошибки при входе:\n" +
+                "- Если логин или пароль неверны, появится сообщение об ошибке.\n" +
+                "- После 3 неудачных попыток аккаунт будет заблокирован.\n" +
+                "- Аккаунт также блокируется, если не использовался более 1 месяца.\n\n" +
+                "4. Смена пароля:\n" +
+                "- При первом входе система потребует сменить пароль.\n" +
+                "- Необходимо ввести текущий пароль, новый пароль и подтверждение нового пароля.\n\n" +
+                "Если у вас возникли вопросы, обратитесь к системному администратору.";
+
+            MessageBox.Show(helpText, "Справка", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+
+    public class ChangePasswordForm : Form
+    {
+        private string login;
+        private string connectionString;
+        
+        private TextBox currentPasswordTextBox;
+        private TextBox newPasswordTextBox;
+        private TextBox confirmPasswordTextBox;
+        private Button changePasswordButton;
+        private Button cancelButton;
+
+        public ChangePasswordForm(string login, string connectionString)
+        {
+            this.login = login;
+            this.connectionString = connectionString;
+            InitializeComponents();
+            this.Text = "Смена пароля";
+            this.Size = new Size(350, 250);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+        }
+
+        private void InitializeComponents()
+        {
+            // Current Password
+            Label currentPasswordLabel = new Label();
+            currentPasswordLabel.Text = "Текущий пароль:";
+            currentPasswordLabel.Location = new Point(20, 20);
+            currentPasswordLabel.Width = 120;
+
+            currentPasswordTextBox = new TextBox();
+            currentPasswordTextBox.Location = new Point(150, 20);
+            currentPasswordTextBox.Width = 150;
+            currentPasswordTextBox.PasswordChar = '*';
+
+            // New Password
+            Label newPasswordLabel = new Label();
+            newPasswordLabel.Text = "Новый пароль:";
+            newPasswordLabel.Location = new Point(20, 60);
+            newPasswordLabel.Width = 120;
+
+            newPasswordTextBox = new TextBox();
+            newPasswordTextBox.Location = new Point(150, 60);
+            newPasswordTextBox.Width = 150;
+            newPasswordTextBox.PasswordChar = '*';
+
+            // Confirm Password
+            Label confirmPasswordLabel = new Label();
+            confirmPasswordLabel.Text = "Подтверждение:";
+            confirmPasswordLabel.Location = new Point(20, 100);
+            confirmPasswordLabel.Width = 120;
+
+            confirmPasswordTextBox = new TextBox();
+            confirmPasswordTextBox.Location = new Point(150, 100);
+            confirmPasswordTextBox.Width = 150;
+            confirmPasswordTextBox.PasswordChar = '*';
+
+            // Buttons
+            changePasswordButton = new Button();
+            changePasswordButton.Text = "Изменить пароль";
+            changePasswordButton.Location = new Point(50, 150);
+            changePasswordButton.Click += ChangePasswordButton_Click;
+
+            cancelButton = new Button();
+            cancelButton.Text = "Отмена";
+            cancelButton.Location = new Point(180, 150);
+            cancelButton.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
+
+            // Add controls to form
+            this.Controls.Add(currentPasswordLabel);
+            this.Controls.Add(currentPasswordTextBox);
+            this.Controls.Add(newPasswordLabel);
+            this.Controls.Add(newPasswordTextBox);
+            this.Controls.Add(confirmPasswordLabel);
+            this.Controls.Add(confirmPasswordTextBox);
+            this.Controls.Add(changePasswordButton);
+            this.Controls.Add(cancelButton);
+        }
+
+        private void ChangePasswordButton_Click(object sender, EventArgs e)
+        {
+            string currentPassword = currentPasswordTextBox.Text.Trim();
+            string newPassword = newPasswordTextBox.Text.Trim();
+            string confirmPassword = confirmPasswordTextBox.Text.Trim();
+
+            if (string.IsNullOrEmpty(currentPassword) || string.IsNullOrEmpty(newPassword) || string.IsNullOrEmpty(confirmPassword))
+            {
+                MessageBox.Show("Все поля обязательны для заполнения.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (newPassword != confirmPassword)
+            {
+                MessageBox.Show("Новый пароль и подтверждение не совпадают.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Проверка текущего пароля
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "SELECT password FROM users WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@login", login);
+                    string storedPassword = cmd.ExecuteScalar()?.ToString();
+
+                    if (currentPassword != storedPassword)
+                    {
+                        MessageBox.Show("Текущий пароль введен неверно.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                }
+
+                // Обновление пароля и снятие флага первого входа
+                query = "UPDATE users SET password = @newPassword, is_first_login = 0 WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@newPassword", newPassword);
+                    cmd.Parameters.AddWithValue("@login", login);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            MessageBox.Show("Пароль успешно изменен.", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            this.DialogResult = DialogResult.OK;
+            this.Close();
+        }
+    }
+}

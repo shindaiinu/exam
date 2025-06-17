@@ -1,0 +1,299 @@
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.Drawing;
+using System.Windows.Forms;
+
+namespace hosphr.Forms.Admin
+{
+    public partial class AdminForm : Form
+    {
+        private string connectionString = "Data Source=DESKTOP-VIC55GK;Initial Catalog=hospital_hr;Integrated Security=True;TrustServerCertificate=True";
+
+        public AdminForm()
+        {
+            InitializeComponent();
+            LoadUsers();
+            InitializeUserManagementControls();
+        }
+
+        private void LoadUsers()
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "SELECT login, role, is_blocked, is_first_login, last_login_date FROM users";
+                SqlDataAdapter adapter = new SqlDataAdapter(query, conn);
+                DataTable dt = new DataTable();
+                adapter.Fill(dt);
+
+                dataGridView1.DataSource = dt;
+                dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            }
+        }
+
+        private void InitializeUserManagementControls()
+        {
+            // Группа для добавления пользователя
+            GroupBox addUserGroup = new GroupBox();
+            addUserGroup.Text = "Добавить пользователя";
+            addUserGroup.Location = new Point(20, 20);
+            addUserGroup.Size = new Size(350, 200);
+
+            // Поля для добавления пользователя
+            Label loginLabel = new Label { Text = "Логин:", Location = new Point(10, 30), Width = 80 };
+            TextBox loginTextBox = new TextBox { Location = new Point(100, 30), Width = 200 };
+
+            Label passwordLabel = new Label { Text = "Пароль:", Location = new Point(10, 70), Width = 80 };
+            TextBox passwordTextBox = new TextBox { Location = new Point(100, 70), Width = 200, PasswordChar = '*' };
+
+            Label roleLabel = new Label { Text = "Роль:", Location = new Point(10, 110), Width = 80 };
+            ComboBox roleComboBox = new ComboBox { Location = new Point(100, 110), Width = 200 };
+            roleComboBox.Items.AddRange(new string[] { "admin", "hr" });
+
+            Button addButton = new Button { Text = "Добавить", Location = new Point(100, 150), Width = 100 };
+            addButton.Click += (s, e) => AddUser(loginTextBox.Text, passwordTextBox.Text, roleComboBox.Text);
+
+            addUserGroup.Controls.AddRange(new Control[] { loginLabel, loginTextBox, passwordLabel, passwordTextBox, roleLabel, roleComboBox, addButton });
+
+            // Группа для управления пользователями
+            GroupBox manageUserGroup = new GroupBox();
+            manageUserGroup.Text = "Управление пользователями";
+            manageUserGroup.Location = new Point(400, 20);
+            manageUserGroup.Size = new Size(350, 200);
+
+            Label selectedUserLabel = new Label { Text = "Выбранный пользователь:", Location = new Point(10, 30), Width = 150 };
+            TextBox selectedUserTextBox = new TextBox { Location = new Point(160, 30), Width = 150, ReadOnly = true };
+
+            Button unblockButton = new Button { Text = "Снять блокировку", Location = new Point(20, 70), Width = 150 };
+            unblockButton.Click += (s, e) => UnblockUser(selectedUserTextBox.Text);
+
+            Button resetPasswordButton = new Button { Text = "Сбросить пароль", Location = new Point(180, 70), Width = 150 };
+            resetPasswordButton.Click += (s, e) => ResetPassword(selectedUserTextBox.Text);
+
+            Button deleteButton = new Button { Text = "Удалить пользователя", Location = new Point(20, 110), Width = 150 };
+            deleteButton.Click += (s, e) => DeleteUser(selectedUserTextBox.Text);
+
+            Button refreshButton = new Button { Text = "Обновить список", Location = new Point(180, 110), Width = 150 };
+            refreshButton.Click += (s, e) => LoadUsers();
+
+            manageUserGroup.Controls.AddRange(new Control[] { selectedUserLabel, selectedUserTextBox, unblockButton, resetPasswordButton, deleteButton, refreshButton });
+
+            // Обработчик выбора пользователя в DataGridView
+            dataGridView1.SelectionChanged += (s, e) =>
+            {
+                if (dataGridView1.CurrentRow != null)
+                {
+                    selectedUserTextBox.Text = dataGridView1.CurrentRow.Cells["login"].Value.ToString();
+                }
+            };
+
+            this.Controls.Add(addUserGroup);
+            this.Controls.Add(manageUserGroup);
+        }
+
+        private void AddUser(string login, string password, string role)
+        {
+            if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password) || string.IsNullOrEmpty(role))
+            {
+                MessageBox.Show("Все поля обязательны для заполнения.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Проверка существования пользователя
+            if (UserExists(login))
+            {
+                MessageBox.Show("Пользователь с таким логином уже существует.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "INSERT INTO users (login, password, role, is_first_login, is_blocked) VALUES (@login, @password, @role, 1, 0)";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@login", login);
+                    cmd.Parameters.AddWithValue("@password", password);
+                    cmd.Parameters.AddWithValue("@role", role);
+
+                    try
+                    {
+                        cmd.ExecuteNonQuery();
+                        MessageBox.Show("Пользователь успешно добавлен.", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        LoadUsers();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Ошибка при добавлении пользователя: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        private bool UserExists(string login)
+        {
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "SELECT COUNT(1) FROM users WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@login", login);
+                    return (int)cmd.ExecuteScalar() > 0;
+                }
+            }
+        }
+
+        private void UnblockUser(string login)
+        {
+            if (string.IsNullOrEmpty(login))
+            {
+                MessageBox.Show("Выберите пользователя.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "UPDATE users SET is_blocked = 0, failed_attempts = 0 WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@login", login);
+                    int rowsAffected = cmd.ExecuteNonQuery();
+
+                    if (rowsAffected > 0)
+                    {
+                        MessageBox.Show("Пользователь разблокирован.", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        LoadUsers();
+                    }
+                    else
+                    {
+                        MessageBox.Show("Не удалось разблокировать пользователя.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        private void ResetPassword(string login)
+        {
+            if (string.IsNullOrEmpty(login))
+            {
+                MessageBox.Show("Выберите пользователя.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using (var form = new ResetPasswordForm(login, connectionString))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    MessageBox.Show("Пароль успешно сброшен.", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    LoadUsers();
+                }
+            }
+        }
+
+        private void DeleteUser(string login)
+        {
+            if (string.IsNullOrEmpty(login))
+            {
+                MessageBox.Show("Выберите пользователя.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (MessageBox.Show($"Вы уверены, что хотите удалить пользователя {login}?", "Подтверждение", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    conn.Open();
+                    string query = "DELETE FROM users WHERE login = @login";
+                    using (SqlCommand cmd = new SqlCommand(query, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@login", login);
+                        int rowsAffected = cmd.ExecuteNonQuery();
+
+                        if (rowsAffected > 0)
+                        {
+                            MessageBox.Show("Пользователь удален.", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            LoadUsers();
+                        }
+                        else
+                        {
+                            MessageBox.Show("Не удалось удалить пользователя.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public class ResetPasswordForm : Form
+    {
+        private string login;
+        private string connectionString;
+
+        private TextBox newPasswordTextBox;
+        private TextBox confirmPasswordTextBox;
+
+        public ResetPasswordForm(string login, string connectionString)
+        {
+            this.login = login;
+            this.connectionString = connectionString;
+            InitializeComponents();
+            this.Text = "Сброс пароля";
+            this.Size = new Size(300, 200);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.StartPosition = FormStartPosition.CenterScreen;
+        }
+
+        private void InitializeComponents()
+        {
+            Label newPasswordLabel = new Label { Text = "Новый пароль:", Location = new Point(20, 20), Width = 120 };
+            newPasswordTextBox = new TextBox { Location = new Point(150, 20), Width = 120, PasswordChar = '*' };
+
+            Label confirmPasswordLabel = new Label { Text = "Подтверждение:", Location = new Point(20, 60), Width = 120 };
+            confirmPasswordTextBox = new TextBox { Location = new Point(150, 60), Width = 120, PasswordChar = '*' };
+
+            Button okButton = new Button { Text = "OK", Location = new Point(50, 100), Width = 80 };
+            okButton.Click += OkButton_Click;
+
+            Button cancelButton = new Button { Text = "Отмена", Location = new Point(150, 100), Width = 80 };
+            cancelButton.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
+
+            this.Controls.AddRange(new Control[] { newPasswordLabel, newPasswordTextBox, confirmPasswordLabel, confirmPasswordTextBox, okButton, cancelButton });
+        }
+
+        private void OkButton_Click(object sender, EventArgs e)
+        {
+            string newPassword = newPasswordTextBox.Text.Trim();
+            string confirmPassword = confirmPasswordTextBox.Text.Trim();
+
+            if (string.IsNullOrEmpty(newPassword) || string.IsNullOrEmpty(confirmPassword))
+            {
+                MessageBox.Show("Все поля обязательны для заполнения.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (newPassword != confirmPassword)
+            {
+                MessageBox.Show("Пароли не совпадают.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "UPDATE users SET password = @password, is_first_login = 1, is_blocked = 0, failed_attempts = 0 WHERE login = @login";
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@password", newPassword);
+                    cmd.Parameters.AddWithValue("@login", login);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            this.DialogResult = DialogResult.OK;
+            this.Close();
+        }
+    }
+}
